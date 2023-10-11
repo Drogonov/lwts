@@ -1,0 +1,4 @@
+/.env
+/lwts-app/.env
+/lwts-app/node_modules
+/lwts-app/package-lock.json
