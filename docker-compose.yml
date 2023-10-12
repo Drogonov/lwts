@@ -1,31 +1,42 @@
+# version of the docker (double check that your machine and VPS have sumular versions)
 version: '3.8'
 
+# services (containers which do you have)
 services:
+  # if you want to use it with dockerize and wait-for-it.sh use db not other name
   db:
+    # if you want to build it on ARM use this line
     platform: linux/x86_64
+    # on 5.6 image db drop connection and works pretty strange. So i use 5.6 version. But this version doesnt support cyrilic sumbols on DataTypes so you need to add them manually
     image: mysql:5.6
+    # i try to remove problems with connection on 5.7 with it but it doesnt works
     command: --max_allowed_packet=32505856 
+    # if it have problems we will restart it
     restart: unless-stopped
+    # way to your production .env file
     env_file: ./.env
+    # no types here so use this parameters to create DB and users
     environment:
       - MYSQL_ROOT_PASSWORD=${MYSQLDB_ROOT_PASSWORD}
       - MYSQL_PASSWORD=${MYSQLDB_USER_PASSWORD}
       - MYSQL_USER=${MYSQLDB_USER}
       - MYSQL_DATABASE=${MYSQLDB_DATABASE}
       - MYSQL_HOST=${MYSQLDB_HOST}
+    # be careful with ports becouse in Dockerfile they are hardcoded
     ports:
       - ${MYSQLDB_LOCAL_PORT}:${MYSQLDB_DOCKER_PORT}
 
   app:
+    # your app folder
     build: ./lwts-app
+    # this line should do all work but it doesnt. so i use dockerize and wait-for-it.sh to load app only when DB will be setuped and created.
     depends_on:
       - db
     links:
       - db
     restart: unless-stopped
     env_file: ./.env
-    ports:
-      - ${NODE_LOCAL_PORT}:${NODE_DOCKER_PORT}
+    # here we are setting our .env variables from app
     environment:
       - PORT=${NODE_LOCAL_PORT}
       - DB_HOST=${MYSQLDB_HOST}
@@ -36,6 +47,8 @@ services:
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_ORGID=${OPENAI_ORGID}
+    ports:
+      - ${NODE_LOCAL_PORT}:${NODE_DOCKER_PORT}
 
 volumes:
   db:
