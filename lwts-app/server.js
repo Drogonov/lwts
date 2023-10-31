@@ -7,8 +7,7 @@ require('dotenv').config()
 const { db, initializeDataBase } = require("./db/db");
 
 // Importing Telegram Bot
-const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
-const express = require("express")
+const { Bot } = require("grammy");
 const bot = new Bot(process.env.TELEGRAM_TOKEN);
 
 // Importing Open AI
@@ -61,24 +60,25 @@ bot.api.setMyCommands([
 
 // Set Command Business logic
 bot.command("start", async (ctx) => {
-  ctx.reply("Приветствую путник, в моем баре. Сегодня я тебе расскажу одну забавную историю из твоего прошлого. Если не боишься вспомнить, конечно же. Начнем?")
-
   const chatId = ctx.chat.id;
   const user = await db.users.findOne({ where: { chatId: chatId }});
 
   if (!user) {
+    await ctx.reply(`Приветствую ${ctx.from.first_name}, в моем баре. Сегодня я тебе расскажу одну забавную историю из твоего прошлого. Если не боишься вспомнить, конечно же.`)
     await db.users.create({
       chatId: chatId,
       name: ctx.from.first_name,
       chatHistory: JSON.stringify(messagesPromt)
     })
+    await ctx.reply(`Только для начала пара условностей. Ты можешь начать свой путь и когда, ты достигнешь своей цели я тебе скажу об этом. Для этого нажми /new_journey \nТакже ты можешь стереть воспоминания о предыдущей истории вызвав /start. \nНу и узнать сколько дорог ты прошел до конца вызвав /roads.\n\nТак что начнем?`)
   } else {
+    await ctx.reply(`О снова ${ctx.from.first_name}, ты вовремя, я как раз вспомнил еще кое что интересное. Начнем /new_journey?`)
     clearHistory(ctx)
   }
 });
 
 bot.command("journey_rules", async (ctx) => {
-  ctx.reply(`Правила просты дорогой ${ctx.from.first_name}.\nТы можешь начать свой путь и когда, ты достигнешь своей цели я тебе скажу об этом. \nТакже ты можешь стереть воспоминания о предыдущей истории. \nУзнать сколько дорог ты прошел до конца.\n\nНа этом пока все`)
+  ctx.reply(`Правила просты дорогой ${ctx.from.first_name}.\nТы можешь начать свой путь и когда, ты достигнешь своей цели я тебе скажу об этом. Для этого нажми /new_journey \nТакже ты можешь стереть воспоминания о предыдущей истории вызвав /start. \nНу и узнать сколько дорог ты прошел до конца вызвав /roads.\n\nНа этом пока все`)
 });
 
 bot.command("roads", async (ctx) => {
@@ -107,9 +107,8 @@ bot.on('message', async ctx => {
     }
   
     try {
+      const user = await db.users.findOne({ where: { chatId: chatId }});
       if (wasJourneyModActivated) {
-        const user = await db.users.findOne({ where: { chatId: chatId }});
-
         if (!stillLoading) {
           stillLoading = true;
           loadMessage(user, userMessage, ctx);
@@ -117,10 +116,11 @@ bot.on('message', async ctx => {
           bot.api.sendMessage(chatId, 'Потерпи немного, я почти вспомнил, что будет дальше...');
         }
       } else {
-        bot.api.sendMessage(chatId, 'Сейчас ты говоришь в пустоту, если хочешь начать историю выйди из комнаты. Соверши ошибку и нажми new_journey');
+        bot.api.sendMessage(chatId, 'Сейчас ты говоришь в пустоту, если хочешь начать историю выйди из комнаты. Соверши ошибку и нажми /new_journey');
       }
     } catch (e) {
-      bot.api.sendMessage(chatId, 'Похоже что-то пошло не так.');
+      bot.api.sendMessage(chatId, 'Похоже что-то пошло не так. Попробуй начать заново /start');
+      wasJourneyModActivated = false;
       stillLoading = false;
       wasWayEnded = false;
       console.log(e);
@@ -128,22 +128,13 @@ bot.on('message', async ctx => {
 });
 
 async function loadMessage(user, message, ctx) {
-
   const messages = JSON.parse(user.chatHistory)
   messages.push({
     "role": "user",
     "content": message
   });
   
-  const response = await openai.chat.completions.create({
-    model: "gpt-4",
-    messages: messages,
-    temperature: 1,
-    max_tokens: 1000,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
-  });
+  const response = await generateResponse(messages);;
 
   console.log(response);
   console.log(response.choices[0].message);
@@ -167,6 +158,7 @@ async function loadMessage(user, message, ctx) {
   }
 
   if (assistantMessage.replace(/ /g,'').includes(endWord.replace(/ /g,''))) {
+    console.log("WAY ENDED")
     let howManyRoadsPassed = user.howManyRoadsPassed || 0;
     howManyRoadsPassed = howManyRoadsPassed + 1;
     user.howManyRoadsPassed = howManyRoadsPassed;
@@ -175,6 +167,7 @@ async function loadMessage(user, message, ctx) {
     bot.api.sendMessage(savedChatId, "Cпасибо за то, что отважился пройти это небольшое приключение, а теперь подожди немного и картина произошедшего всплывет у тебя в памяти");
     generateJorneyEndImageUrl(user, ctx)
   } else {
+    console.log("GO NEXT")
     stillLoading = false;
   }
 }
@@ -189,16 +182,7 @@ async function generateJorneyEndImageUrl(user, ctx) {
   });
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: messages,
-      temperature: 1,
-      max_tokens: 1000,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0
-    });
-
+    const response = await generateResponse(messages);
     const imagePromt = response.choices[0].message.content;
     const imagesConfig = {
       prompt: imagePromt,
@@ -229,4 +213,16 @@ async function clearHistory(ctx) {
   wasJourneyModActivated = false
   wasWayEnded = false
   stillLoading = false
+}
+
+async function generateResponse(messages) {
+  return await openai.chat.completions.create({
+    model: "gpt-4",
+    messages: messages,
+    temperature: 1,
+    max_tokens: 512,
+    top_p: 1,
+    frequency_penalty: 0,
+    presence_penalty: 0
+  });
 }
